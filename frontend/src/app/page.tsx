@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useDropzone } from "react-dropzone";
 import axios from "axios";
 import toast from "react-hot-toast";
 import dynamic from "next/dynamic";
+import { useSession } from "@/lib/auth-client";
+import { useRouter } from "next/navigation";
 
 // Dynamically import editors (client only - uses browser APIs)
 const CanvaStyleEditor = dynamic(() => import("@/components/CanvaStyleEditor"), { ssr: false });
@@ -234,10 +236,23 @@ const TABS = [
 ];
 
 export default function Home() {
+  const { data: session, isPending } = useSession();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!isPending && !session) {
+      router.replace("/signin");
+    }
+  }, [session, isPending]);
+
   const [activeTab, setActiveTab] = useState("canvastext");
   const [canvasFile, setCanvasFile] = useState<File | null>(null);
   const [canvasPages, setCanvasPages] = useState(1);
   const [inEditor, setInEditor] = useState<"canvas" | "canva" | null>(null);
+
+  if (isPending || !session) {
+    return <div style={{ minHeight: "100vh", background: "var(--bg)" }} />;
+  }
 
   const openEditor = (file: File, pages: number) => {
     setCanvasFile(file); setCanvasPages(pages); setInEditor("canvas");
