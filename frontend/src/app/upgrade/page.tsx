@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { signOut } from "@/lib/auth-client";
 import { useRouter } from "next/navigation";
 
@@ -28,41 +27,31 @@ export default function UpgradePage() {
       }}>
         {/* Icon */}
         <div style={{
-          width: 56,
-          height: 56,
+          width: 56, height: 56,
           background: "rgba(255,77,28,0.1)",
           border: "1px solid rgba(255,77,28,0.3)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          margin: "0 auto 1.5rem",
-          fontSize: "1.75rem",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          margin: "0 auto 1.5rem", fontSize: "1.75rem",
         }}>
           🔒
         </div>
 
         <h1 style={{
-          fontFamily: "var(--font-display)",
-          fontSize: "1.75rem",
-          fontWeight: 700,
-          color: "var(--text)",
-          marginBottom: "0.75rem",
+          fontFamily: "var(--font-display)", fontSize: "1.75rem",
+          fontWeight: 700, color: "var(--text)", marginBottom: "0.75rem",
         }}>
           Your Free Trial Has Ended
         </h1>
 
         <p style={{ color: "var(--text-muted)", fontSize: "0.95rem", lineHeight: 1.6, marginBottom: "2rem" }}>
           You&apos;ve been using <strong style={{ color: "var(--text)" }}>PDF Editor Pro</strong> for 7 days.
-          Upgrade now to keep access to all 10 PDF tools — no limits, forever.
+          Contact us to get full access.
         </p>
 
         {/* Features */}
         <div style={{
-          background: "var(--surface2)",
-          border: "1px solid var(--border)",
-          padding: "1.25rem",
-          marginBottom: "2rem",
-          textAlign: "left",
+          background: "var(--surface2)", border: "1px solid var(--border)",
+          padding: "1.25rem", marginBottom: "2rem", textAlign: "left",
         }}>
           {[
             "PDF Text & Canvas Editor",
@@ -77,39 +66,12 @@ export default function UpgradePage() {
           ))}
         </div>
 
-        {/* CTA Button */}
-        <a
-          href="https://knai-developer.gumroad.com/l/pdf-editor"
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{
-            display: "block",
-            background: "var(--accent)",
-            color: "white",
-            padding: "1rem",
-            fontFamily: "var(--font-display)",
-            fontWeight: 700,
-            fontSize: "1rem",
-            letterSpacing: "0.05em",
-            textDecoration: "none",
-            clipPath: "polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%)",
-            marginBottom: "1rem",
-            transition: "background 0.2s",
-          }}
-        >
-          Get Full Access — Gumroad
-        </a>
-
         <button
           onClick={async () => { await signOut(); router.push("/signin"); }}
           style={{
-            background: "transparent",
-            border: "1px solid var(--border)",
-            color: "var(--text-muted)",
-            padding: "0.6rem 1.25rem",
-            cursor: "pointer",
-            fontSize: "0.85rem",
-            fontFamily: "var(--font-body)",
+            background: "transparent", border: "1px solid var(--border)",
+            color: "var(--text-muted)", padding: "0.6rem 1.25rem",
+            cursor: "pointer", fontSize: "0.85rem", fontFamily: "var(--font-body)",
           }}
         >
           Sign Out
