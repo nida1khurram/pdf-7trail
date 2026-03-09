@@ -64,6 +64,104 @@ function downloadBlob(blob: Blob, name: string) {
   URL.revokeObjectURL(url);
 }
 
+async function renderPageToDataUrl(pdfFile: File, pageNum: number): Promise<{ img: string; w: number; h: number }> {
+  const lib = (window as any).pdfjsLib;
+  const url = URL.createObjectURL(pdfFile);
+  const pdf = await lib.getDocument(url).promise;
+  const pg = await pdf.getPage(pageNum);
+  const vp = pg.getViewport({ scale: 2 });
+  const cvs = document.createElement("canvas");
+  cvs.width = vp.width; cvs.height = vp.height;
+  await pg.render({ canvasContext: cvs.getContext("2d")!, viewport: vp }).promise;
+  URL.revokeObjectURL(url);
+  return { img: cvs.toDataURL("image/png"), w: vp.width, h: vp.height };
+}
+
+async function drawElementsOnCtx(ctx: CanvasRenderingContext2D, els: CanvasEl[], cw: number, ch: number) {
+  for (const el of els) {
+    ctx.save();
+    ctx.globalAlpha = el.opacity;
+    const cx = el.x + el.width / 2;
+    const cy = el.y + el.height / 2;
+    ctx.translate(cx, cy);
+    ctx.rotate((el.rotation * Math.PI) / 180);
+    ctx.translate(-cx, -cy);
+
+    if (el.type === "shape") {
+      const se = el as ShapeEl;
+      ctx.fillStyle = se.fill; ctx.strokeStyle = se.stroke; ctx.lineWidth = se.strokeWidth;
+      if (se.shape === "rect") { ctx.fillRect(el.x, el.y, el.width, el.height); ctx.strokeRect(el.x, el.y, el.width, el.height); }
+      else if (se.shape === "ellipse") {
+        ctx.beginPath();
+        ctx.ellipse(el.x + el.width / 2, el.y + el.height / 2, el.width / 2, el.height / 2, 0, 0, Math.PI * 2);
+        ctx.fill(); ctx.stroke();
+      }
+    }
+
+    if (el.type === "text") {
+      const te = el as TextEl;
+      if (te.bgColor) { ctx.fillStyle = te.bgColor; ctx.fillRect(el.x, el.y, el.width, el.height); }
+      ctx.font = `${te.italic ? "italic " : ""}${te.bold ? "bold " : ""}${te.fontSize}px ${te.fontFamily}`;
+      ctx.fillStyle = te.color;
+      ctx.textAlign = te.align;
+      const ax = te.align === "center" ? el.x + el.width / 2 : te.align === "right" ? el.x + el.width : el.x;
+      const words = te.content.split(" ");
+      let line = ""; let lineY = el.y + te.fontSize;
+      for (const word of words) {
+        const test = line + word + " ";
+        if (ctx.measureText(test).width > el.width && line) {
+          ctx.fillText(line, ax, lineY);
+          if (te.underline) { const m = ctx.measureText(line); ctx.fillRect(ax, lineY + 2, m.width, 1); }
+          line = word + " "; lineY += te.fontSize * 1.3;
+        } else { line = test; }
+      }
+      if (line) {
+        ctx.fillText(line, ax, lineY);
+        if (te.underline) { const m = ctx.measureText(line); ctx.fillRect(ax, lineY + 2, m.width, 1); }
+      }
+    }
+
+    if (el.type === "image" || el.type === "signature") {
+      const ie = el as ImageEl;
+      const img = new Image(); img.src = ie.src;
+      await new Promise(r => { img.onload = r; });
+      ctx.drawImage(img, el.x, el.y, el.width, el.height);
+    }
+
+    ctx.restore();
+  }
+}
+
+// ─── Save Modal ────────────────────────────────────────────────────────────────
+function SaveModal({ currentPage, pageCount, saving, onSave, onClose }: {
+  currentPage: number; pageCount: number; saving: boolean;
+  onSave: (mode: "current" | "all") => void; onClose: () => void;
+}) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.88)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ background: "#111", border: "1px solid #333", padding: "1.5rem", borderRadius: 6, width: 360, maxWidth: "90vw" }}>
+        <h3 style={{ fontFamily: "Syne,sans-serif", color: "#f0ece4", fontSize: "1rem", marginBottom: "0.5rem" }}>💾 Save as PDF</h3>
+        <p style={{ color: "#666", fontSize: "0.75rem", marginBottom: "1.25rem" }}>Select which pages to include in the exported PDF</p>
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+          <button className="btn-primary" disabled={saving} onClick={() => onSave("current")}
+            style={{ display: "flex", alignItems: "center", gap: "0.5rem", justifyContent: "center" }}>
+            {saving ? <span className="spinner" /> : "📄"} Current Page Only
+            <span style={{ fontSize: "0.72rem", opacity: 0.7 }}>(Page {currentPage})</span>
+          </button>
+          <button className="btn-ghost" disabled={saving} onClick={() => onSave("all")}
+            style={{ borderColor: "rgba(255,140,66,0.5)", color: "rgb(255,140,66)", display: "flex", alignItems: "center", gap: "0.5rem", justifyContent: "center" }}>
+            {saving ? <span className="spinner" /> : "📚"} All Pages
+            <span style={{ fontSize: "0.72rem", opacity: 0.7 }}>({pageCount} pages)</span>
+          </button>
+        </div>
+        {!saving && (
+          <button className="btn-ghost" onClick={onClose} style={{ marginTop: "0.75rem", width: "100%", fontSize: "0.8rem" }}>Cancel</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Signature Pad ────────────────────────────────────────────────────────────
 function SignaturePad({ onSave, onClose }: { onSave: (d: string) => void; onClose: () => void }) {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -224,8 +322,18 @@ export default function CanvaStyleEditor({ pdfFile, pageCount, onBack }: {
   const [canvasH, setCanvasH] = useState(1122);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [showSaveModal, setShowSaveModal] = useState(false);
 
-  const [elements, setElements] = useState<CanvasEl[]>([]);
+  const [pageElements, setPageElements] = useState<Record<number, CanvasEl[]>>({});
+  const elements = pageElements[page] ?? [];
+  const setElements = useCallback((updater: CanvasEl[] | ((prev: CanvasEl[]) => CanvasEl[])) => {
+    setPageElements(prev => {
+      const current = prev[page] ?? [];
+      const next = typeof updater === "function" ? updater(current) : updater;
+      return { ...prev, [page]: next };
+    });
+  }, [page]);
+
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null); // inline text edit
 
@@ -236,23 +344,26 @@ export default function CanvaStyleEditor({ pdfFile, pageCount, onBack }: {
   const dragRef = useRef<{ id: string; startX: number; startY: number; origX: number; origY: number } | null>(null);
   const resizeRef = useRef<{ id: string; handle: string; startX: number; startY: number; origW: number; origH: number; origX: number; origY: number } | null>(null);
 
-  // Undo
-  const undoStack = useRef<CanvasEl[][]>([]);
+  // Undo (per-page)
+  const undoStack = useRef<Record<number, CanvasEl[][]>>({});
   const [canUndo, setCanUndo] = useState(false);
 
   const pushUndo = useCallback((els: CanvasEl[]) => {
-    undoStack.current.push(els.map(e => ({ ...e })));
-    if (undoStack.current.length > 60) undoStack.current.shift();
+    if (!undoStack.current[page]) undoStack.current[page] = [];
+    undoStack.current[page].push(els.map(e => ({ ...e })));
+    if (undoStack.current[page].length > 60) undoStack.current[page].shift();
     setCanUndo(true);
-  }, []);
+  }, [page]);
 
   const undo = useCallback(() => {
-    if (!undoStack.current.length) return;
-    setElements(undoStack.current.pop()!);
-    setCanUndo(undoStack.current.length > 0);
+    const stack = undoStack.current[page];
+    if (!stack?.length) return;
+    const prev = stack.pop()!;
+    setPageElements(p => ({ ...p, [page]: prev }));
+    setCanUndo((undoStack.current[page]?.length ?? 0) > 0);
     setSelectedId(null); setEditingId(null);
     toast("↩ Undo", { duration: 700 });
-  }, []);
+  }, [page]);
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -268,6 +379,13 @@ export default function CanvaStyleEditor({ pdfFile, pageCount, onBack }: {
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, [undo, selectedId, elements, pushUndo]);
+
+  // Reset selection when page changes
+  useEffect(() => {
+    setSelectedId(null);
+    setEditingId(null);
+    setCanUndo((undoStack.current[page]?.length ?? 0) > 0);
+  }, [page]);
 
   // ── Render PDF page as image ───────────────────────────────────────────────
   useEffect(() => {
@@ -411,9 +529,9 @@ export default function CanvaStyleEditor({ pdfFile, pageCount, onBack }: {
   };
 
   // ── Export to PDF ─────────────────────────────────────────────────────────
-  const handleSave = async () => {
-    if (!bgImage) return;
+  const handleSave = async (mode: "current" | "all") => {
     setSaving(true);
+    setShowSaveModal(false);
     try {
       // Load jsPDF dynamically
       if (!(window as any).jspdf) {
@@ -424,84 +542,47 @@ export default function CanvaStyleEditor({ pdfFile, pageCount, onBack }: {
           document.head.appendChild(s);
         });
       }
+      const { jsPDF } = (window as any).jspdf;
 
-      const cvs = document.createElement("canvas");
-      cvs.width = canvasW; cvs.height = canvasH;
-      const ctx = cvs.getContext("2d")!;
+      const pagesToRender = mode === "all"
+        ? Array.from({ length: pageCount }, (_, i) => i + 1)
+        : [page];
 
-      // 1. Draw PDF page background
-      const bg = new Image(); bg.src = bgImage;
-      await new Promise(r => { bg.onload = r; });
-      ctx.drawImage(bg, 0, 0, canvasW, canvasH);
+      let pdf: any = null;
 
-      // 2. Draw each element
-      for (const el of elements) {
-        ctx.save();
-        ctx.globalAlpha = el.opacity;
-        const cx = el.x + el.width / 2;
-        const cy = el.y + el.height / 2;
-        ctx.translate(cx, cy);
-        ctx.rotate((el.rotation * Math.PI) / 180);
-        ctx.translate(-cx, -cy);
+      for (let i = 0; i < pagesToRender.length; i++) {
+        const pageNum = pagesToRender[i];
+        const { img: pageImg, w: pw, h: ph } = pageNum === page && bgImage
+          ? { img: bgImage, w: canvasW, h: canvasH }
+          : await renderPageToDataUrl(pdfFile, pageNum);
 
-        if (el.type === "shape") {
-          const se = el as ShapeEl;
-          ctx.fillStyle = se.fill;
-          ctx.strokeStyle = se.stroke;
-          ctx.lineWidth = se.strokeWidth;
-          if (se.shape === "rect") {
-            ctx.fillRect(el.x, el.y, el.width, el.height);
-            ctx.strokeRect(el.x, el.y, el.width, el.height);
-          } else if (se.shape === "ellipse") {
-            ctx.beginPath();
-            ctx.ellipse(el.x + el.width / 2, el.y + el.height / 2, el.width / 2, el.height / 2, 0, 0, Math.PI * 2);
-            ctx.fill(); ctx.stroke();
-          }
+        const cvs = document.createElement("canvas");
+        cvs.width = pw; cvs.height = ph;
+        const ctx = cvs.getContext("2d")!;
+
+        // Draw page background
+        const bg = new Image(); bg.src = pageImg;
+        await new Promise(r => { bg.onload = r; });
+        ctx.drawImage(bg, 0, 0, pw, ph);
+
+        // Draw elements for this page
+        const els = pageElements[pageNum] ?? [];
+        await drawElementsOnCtx(ctx, els, pw, ph);
+
+        const imgData = cvs.toDataURL("image/jpeg", 0.92);
+        const orientation = pw > ph ? "landscape" : "portrait";
+
+        if (!pdf) {
+          pdf = new jsPDF({ orientation, unit: "px", format: [pw, ph] });
+        } else {
+          pdf.addPage([pw, ph], orientation);
         }
-
-        if (el.type === "text") {
-          const te = el as TextEl;
-          if (te.bgColor) { ctx.fillStyle = te.bgColor; ctx.fillRect(el.x, el.y, el.width, el.height); }
-          const style = `${te.italic ? "italic " : ""}${te.bold ? "bold " : ""}${te.fontSize}px ${te.fontFamily}`;
-          ctx.font = style;
-          ctx.fillStyle = te.color;
-          ctx.textAlign = te.align;
-          const ax = te.align === "center" ? el.x + el.width / 2 : te.align === "right" ? el.x + el.width : el.x;
-          // Word-wrap
-          const words = te.content.split(" ");
-          let line = ""; let lineY = el.y + te.fontSize;
-          for (const word of words) {
-            const test = line + word + " ";
-            if (ctx.measureText(test).width > el.width && line) {
-              ctx.fillText(line, ax, lineY);
-              if (te.underline) { const m = ctx.measureText(line); ctx.fillRect(ax, lineY + 2, m.width, 1); }
-              line = word + " "; lineY += te.fontSize * 1.3;
-            } else { line = test; }
-          }
-          if (line) {
-            ctx.fillText(line, ax, lineY);
-            if (te.underline) { const m = ctx.measureText(line); ctx.fillRect(ax, lineY + 2, m.width, 1); }
-          }
-        }
-
-        if (el.type === "image" || el.type === "signature") {
-          const ie = el as ImageEl;
-          const img = new Image(); img.src = ie.src;
-          await new Promise(r => { img.onload = r; });
-          ctx.drawImage(img, el.x, el.y, el.width, el.height);
-        }
-
-        ctx.restore();
+        pdf.addImage(imgData, "JPEG", 0, 0, pw, ph);
       }
 
-      // 3. Canvas → PDF via jsPDF
-      const imgData = cvs.toDataURL("image/jpeg", 0.92);
-      const { jsPDF } = (window as any).jspdf;
-      const orientation = canvasW > canvasH ? "landscape" : "portrait";
-      const pdf = new jsPDF({ orientation, unit: "px", format: [canvasW, canvasH] });
-      pdf.addImage(imgData, "JPEG", 0, 0, canvasW, canvasH);
-      pdf.save("edited_page.pdf");
-      toast.success("PDF saved! 🎉");
+      const filename = mode === "all" ? "edited_all_pages.pdf" : `edited_page_${page}.pdf`;
+      pdf.save(filename);
+      toast.success(mode === "all" ? `All ${pageCount} pages saved! 🎉` : `Page ${page} saved! 🎉`);
     } catch (err) {
       console.error(err);
       toast.error("Error saving PDF");
@@ -588,8 +669,8 @@ export default function CanvaStyleEditor({ pdfFile, pageCount, onBack }: {
             ↩ Undo <span style={{ fontSize: "0.6rem" }}>Ctrl+Z</span>
           </button>
           <button className="btn-ghost" onClick={() => { pushUndo(elements); setElements([]); }} style={{ fontSize: "0.75rem" }}>Clear</button>
-          <button className="btn-primary" onClick={handleSave} disabled={saving || !bgImage}>
-            {saving ? <span className="spinner" /> : "💾 PDF Save"}
+          <button className="btn-primary" onClick={() => setShowSaveModal(true)} disabled={saving || !bgImage}>
+            {saving ? <><span className="spinner" />&nbsp;Saving...</> : "💾 PDF Save"}
           </button>
         </div>
       </div>
@@ -725,7 +806,7 @@ export default function CanvaStyleEditor({ pdfFile, pageCount, onBack }: {
               if (el.type === "image" || el.type === "signature") {
                 const ie = el as ImageEl;
                 return (
-                  <div key={el.id} style={style} onMouseDown={e => onElMouseDown(e, el.id)}>
+                  <div key={el.id} style={style} onMouseDown={e => onElMouseDown(e, el.id)} onClick={e => e.stopPropagation()}>
                     <img src={ie.src} alt={el.type} style={{ width: "100%", height: "100%", objectFit: "contain", display: "block", pointerEvents: "none" }} />
                     {isSelected && <ResizeHandles id={el.id} />}
                     {isSelected && (
@@ -749,6 +830,16 @@ export default function CanvaStyleEditor({ pdfFile, pageCount, onBack }: {
         <SignaturePad
           onSave={src => { const p = (window as any)._sigPos || { x: 100, y: 100 }; addSignature(src, p.x, p.y); }}
           onClose={() => { setShowSigPad(false); setActiveTool("select"); }}
+        />
+      )}
+
+      {showSaveModal && (
+        <SaveModal
+          currentPage={page}
+          pageCount={pageCount}
+          saving={saving}
+          onSave={handleSave}
+          onClose={() => setShowSaveModal(false)}
         />
       )}
 

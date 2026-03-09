@@ -5,7 +5,7 @@ import { useDropzone } from "react-dropzone";
 import axios from "axios";
 import toast from "react-hot-toast";
 import dynamic from "next/dynamic";
-import { useSession } from "@/lib/auth-client";
+import { useSession, signOut } from "@/lib/auth-client";
 import { useRouter } from "next/navigation";
 
 // Dynamically import editors (client only - uses browser APIs)
@@ -290,12 +290,23 @@ export default function Home() {
             v2.0 — Canvas Editor Update
           </p>
         </div>
-        <div style={{ marginLeft: "auto" }}>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "0.75rem" }}>
           <span style={{
             background: "rgba(255,77,28,0.1)", border: "1px solid rgba(255,77,28,0.3)",
             color: "var(--accent)", padding: "0.2rem 0.6rem", fontSize: "0.7rem",
             fontFamily: "Syne, sans-serif", fontWeight: 700, letterSpacing: "0.08em"
           }}>NEW: Visual Canvas Editor</span>
+          <div style={{ width: 1, height: 20, background: "var(--border)" }} />
+          <span style={{ color: "var(--text-muted)", fontSize: "0.75rem", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {session.user.email}
+          </span>
+          <button
+            className="btn-ghost"
+            style={{ fontSize: "0.75rem", padding: "0.25rem 0.6rem", borderColor: "rgba(220,80,80,0.4)", color: "#e06c75" }}
+            onClick={() => signOut({ fetchOptions: { onSuccess: () => router.push("/signin") } })}
+          >
+            Sign Out
+          </button>
         </div>
       </header>
 
